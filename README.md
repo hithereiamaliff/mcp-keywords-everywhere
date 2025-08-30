@@ -18,6 +18,14 @@ Do note that this is **NOT** an official MCP server by Keywords Everywhere.
 
 ## Installation
 
+### Installing via Smithery
+
+To install mcp-keywords-everywhere for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@hithereiamaliff/mcp-keywords-everywhere):
+
+```bash
+npx -y @smithery/cli install @hithereiamaliff/mcp-keywords-everywhere --client claude
+```
+
 ### Prerequisites
 
 - Node.js 16.0.0 or higher
