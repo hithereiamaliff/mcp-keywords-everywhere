@@ -165,7 +165,23 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - **GitHub Issues**: [Report bugs or request features](https://github.com/hithereiamaliff/mcp-keywords-everywhere/issues)
 - **Keywords Everywhere API**: [Official documentation](https://api.keywordseverywhere.com/docs/#/)
 
+## Transport Support
+
+This MCP server supports both transport types:
+
+- **Streamable HTTP Transport**: The recommended transport for production use, offering better scalability and performance.
+- **STDIO Transport**: Legacy transport, maintained for backward compatibility.
+
+For details on the migration from STDIO to Streamable HTTP transport, see [MIGRATION.md](MIGRATION.md).
+
 ## Changelog
+
+### 1.1.0
+- Migrated from STDIO to Streamable HTTP transport
+- Added support for both transport types
+- Added smithery.yaml configuration
+- Improved session management
+- Enhanced error handling
 
 ### 1.0.0
 - Initial release

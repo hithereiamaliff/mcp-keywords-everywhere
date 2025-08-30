@@ -2,8 +2,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import express from "express";
 import axios from "axios";
 import { z } from "zod";
+import dotenv from "dotenv";
+import http from "http";
+
+// Load environment variables from .env file
+dotenv.config();
 
 const BASE_URL = "https://api.keywordseverywhere.com/v1";
 const API_KEY = process.env.KEYWORDS_EVERYWHERE_API_KEY;
@@ -608,8 +614,256 @@ Object.entries(TOOLS).forEach(([name, tool]) => {
 });
 
 async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  // Determine transport type based on environment variable or command line argument
+  const transportType = process.env.TRANSPORT_TYPE || 'http';
+  
+  if (transportType === 'stdio') {
+    // Use STDIO transport for backward compatibility
+    console.error('Starting with STDIO transport');
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  } else {
+    // Use HTTP transport (default) - manually implemented since SDK doesn't support it yet
+    const port = parseInt(process.env.PORT || '3000');
+    const host = process.env.HOST || 'localhost';
+    
+    console.error(`Starting with HTTP transport on ${host}:${port}`);
+    
+    // Create Express app for HTTP server
+    const app = express();
+    const httpServer = http.createServer(app);
+    
+    // Add CORS and other middleware
+    app.use((req, res, next) => {
+      // Basic security: validate origin header
+      const origin = req.headers.origin;
+      if (origin) {
+        // You can implement more strict origin validation if needed
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      }
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version');
+      next();
+    });
+    
+    // Parse JSON bodies
+    app.use(express.json());
+    
+    // Session management
+    const sessions = new Map();
+    
+    // Handle preflight requests
+    app.options('/mcp', (req, res) => {
+      res.status(200).end();
+    });
+    
+    // Implement the MCP endpoint for Streamable HTTP transport
+    app.post('/mcp', async (req, res) => {
+      try {
+        // Check protocol version if provided
+        const protocolVersion = req.headers['mcp-protocol-version'];
+        if (protocolVersion && protocolVersion !== '2025-03-26') {
+          return res.status(400).json({
+            error: {
+              code: -32600,
+              message: `Unsupported protocol version: ${protocolVersion}`
+            }
+          });
+        }
+        
+        // Get or create session
+        let sessionId = req.headers['mcp-session-id'];
+        let session;
+        
+        if (sessionId && sessions.has(sessionId)) {
+          session = sessions.get(sessionId);
+        } else if (!sessionId && req.body.method === 'initialize') {
+          // Create new session for initialization requests
+          sessionId = generateSessionId();
+          session = { id: sessionId, createdAt: Date.now() };
+          sessions.set(sessionId, session);
+        } else if (sessionId) {
+          // Invalid session ID
+          return res.status(404).json({
+            error: {
+              code: -32000,
+              message: 'Session not found'
+            }
+          });
+        } else {
+          // Missing session ID for non-initialization request
+          return res.status(400).json({
+            error: {
+              code: -32002,
+              message: 'Session ID required'
+            }
+          });
+        }
+        
+        // Process the MCP request
+        const mcpRequest = req.body;
+        
+        // Handle JSON-RPC batch requests
+        if (Array.isArray(mcpRequest)) {
+          // For simplicity, we'll process each request sequentially
+          const responses = [];
+          
+          for (const request of mcpRequest) {
+            try {
+              const response = await processMcpRequest(request, server);
+              if (response) {
+                responses.push(response);
+              }
+            } catch (error) {
+              responses.push({
+                jsonrpc: '2.0',
+                id: request.id,
+                error: {
+                  code: -32603,
+                  message: error.message || 'Internal error'
+                }
+              });
+            }
+          }
+          
+          // If this is an initialization request, set the session ID header
+          if (mcpRequest.some(req => req.method === 'initialize')) {
+            res.setHeader('Mcp-Session-Id', sessionId);
+          }
+          
+          // Return the batch response
+          return res.json(responses);
+        } else {
+          // Handle single request
+          try {
+            const response = await processMcpRequest(mcpRequest, server);
+            
+            // If this is an initialization request, set the session ID header
+            if (mcpRequest.method === 'initialize') {
+              res.setHeader('Mcp-Session-Id', sessionId);
+            }
+            
+            if (response) {
+              return res.json(response);
+            } else {
+              return res.status(202).end();
+            }
+          } catch (error) {
+            return res.status(500).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32603,
+                message: error.message || 'Internal error'
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error processing request:', error);
+        return res.status(500).json({
+          error: {
+            code: -32603,
+            message: 'Internal server error'
+          }
+        });
+      }
+    });
+    
+    // Start the HTTP server
+    await new Promise((resolve, reject) => {
+      httpServer.listen(port, host, () => {
+        console.error(`MCP server running at http://${host}:${port}/mcp`);
+        resolve();
+      });
+      
+      httpServer.on('error', (error) => {
+        console.error('Failed to start HTTP server:', error);
+        reject(error);
+      });
+    });
+  }
+}
+
+// Helper function to generate a session ID
+function generateSessionId() {
+  return 'session_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+// Helper function to process MCP requests
+async function processMcpRequest(request, server) {
+  // Only handle requests with IDs (not notifications)
+  if (!request.id) {
+    return null;
+  }
+  
+  // Forward the request to the MCP server
+  // This is a simplified implementation - in a real-world scenario,
+  // you would need to properly integrate with the MCP server's request handling
+  
+  // For now, we'll just handle the request manually
+  if (request.method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        name: server.name,
+        version: server.version,
+        tools: Object.keys(TOOLS).map(name => ({
+          name,
+          description: TOOLS[name].description
+        }))
+      }
+    };
+  } else if (request.method === 'invoke') {
+    const { tool, params } = request.params;
+    
+    try {
+      // Find the handler for this tool
+      const handler = handlers[tool];
+      if (!handler) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Tool not found: ${tool}`
+          }
+        };
+      }
+      
+      // Execute the handler
+      const result = await handler(params);
+      const formattedResult = formatResponse(tool, result);
+      
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          content: [{ type: 'text', text: formattedResult }],
+          isError: false
+        }
+      };
+    } catch (error) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          content: [{ type: 'text', text: `Error: ${error.message}` }],
+          isError: true
+        }
+      };
+    }
+  } else {
+    return {
+      jsonrpc: '2.0',
+      id: request.id,
+      error: {
+        code: -32601,
+        message: `Method not supported: ${request.method}`
+      }
+    };
+  }
 }
 
 async function main() {

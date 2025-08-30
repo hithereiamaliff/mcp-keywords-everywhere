@@ -1,0 +1,34 @@
+name: mcp-keywords-everywhere
+version: 1.0.0
+description: MCP server for Keywords Everywhere API integration
+
+# Server configuration
+server:
+  # Transport configuration (streamable-http is the new recommended transport)
+  transport:
+    type: streamable-http
+    path: /mcp
+    port: 3000
+    host: 0.0.0.0  # Binds to all network interfaces for Smithery hosting
+
+  # Session configuration
+  session:
+    enabled: true
+    timeout: 3600  # Session timeout in seconds (1 hour)
+
+# Environment variables that need to be set
+env:
+  - name: KEYWORDS_EVERYWHERE_API_KEY
+    description: API key for Keywords Everywhere
+    required: true
+
+# Build configuration
+build:
+  command: npm ci --production
+  node_version: 18
+
+# Start command
+start:
+  command: node index.js
+  env:
+    TRANSPORT_TYPE: http

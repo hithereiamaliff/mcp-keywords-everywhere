@@ -1,6 +1,6 @@
 {
   "name": "mcp-keywords-everywhere",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "index.js",
   "type": "module",
   "description": "MCP server for Keywords Everywhere API integration",
@@ -15,8 +15,10 @@
   "author": "hithereiamaliff",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.0",
+    "@modelcontextprotocol/sdk": "^1.17.4",
     "axios": "^1.8.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "zod": "^3.22.4"
   },
   "engines": {
