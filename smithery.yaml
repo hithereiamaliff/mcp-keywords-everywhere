@@ -30,8 +30,10 @@ health_check:
   body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
   headers:
     Content-Type: application/json
+    MCP-Protocol-Version: 2025-03-26
+    MCP-Session-Id: test-session-id
   success_status: 200
-  timeout: 30000  # 30 seconds timeout for health check
+  timeout: 60000  # 60 seconds timeout for health check
 
 # Build configuration
 build:

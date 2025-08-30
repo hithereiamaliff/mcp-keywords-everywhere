@@ -815,11 +815,18 @@ async function processMcpRequest(request, server) {
     console.error('Processing initialize request:', request.id);
     
     // Get the tools information
-    const toolsList = Object.keys(TOOLS).map(name => ({
-      name,
-      description: TOOLS[name].description,
-      schema: TOOLS[name].schema
-    }));
+    const toolsList = Object.keys(TOOLS).map(name => {
+      // Convert the tool's inputSchema to the format expected by Smithery
+      const schema = TOOLS[name].inputSchema ? {
+        parameters: TOOLS[name].inputSchema
+      } : undefined;
+      
+      return {
+        name,
+        description: TOOLS[name].description,
+        schema
+      };
+    });
     
     console.error(`Returning ${toolsList.length} tools for initialize request`);
     
@@ -836,9 +843,12 @@ async function processMcpRequest(request, server) {
     const { tool, params } = request.params;
     
     try {
-      // Find the handler for this tool
-      const handler = handlers[tool];
-      if (!handler) {
+      console.error(`Processing invoke request for tool: ${tool}`, params);
+      
+      // Find the tool in our TOOLS object
+      const toolDef = TOOLS[tool];
+      if (!toolDef) {
+        console.error(`Tool not found: ${tool}`);
         return {
           jsonrpc: '2.0',
           id: request.id,
@@ -849,25 +859,43 @@ async function processMcpRequest(request, server) {
         };
       }
       
-      // Execute the handler
+      // Call the handler with the params
+      const handler = handlers[tool];
+      if (!handler) {
+        console.error(`Handler not found for tool: ${tool}`);
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Handler not found for tool: ${tool}`
+          }
+        };
+      }
+      
+      // Execute the tool handler
       const result = await handler(params);
       const formattedResult = formatResponse(tool, result);
+      
+      console.error(`Tool ${tool} executed successfully`);
       
       return {
         jsonrpc: '2.0',
         id: request.id,
         result: {
-          content: [{ type: 'text', text: formattedResult }],
+          content: [{ type: "text", text: formattedResult }],
           isError: false
         }
       };
     } catch (error) {
+      console.error(`Error invoking tool ${tool}:`, error);
+      
       return {
         jsonrpc: '2.0',
         id: request.id,
-        result: {
-          content: [{ type: 'text', text: `Error: ${error.message}` }],
-          isError: true
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : String(error)
         }
       };
     }
