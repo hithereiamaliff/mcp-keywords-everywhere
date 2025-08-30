@@ -657,8 +657,17 @@ async function runServer() {
       res.status(200).end();
     });
     
+    // Add a health check endpoint
+    app.get('/mcp', (req, res) => {
+      res.status(200).json({ status: 'ok', message: 'MCP server is running' });
+    });
+    
     // Implement the MCP endpoint for Streamable HTTP transport
     app.post('/mcp', async (req, res) => {
+      // Set a longer timeout for the response
+      req.setTimeout(30000);
+      res.setTimeout(30000);
+      
       try {
         // Check protocol version if provided
         const protocolVersion = req.headers['mcp-protocol-version'];
@@ -803,16 +812,24 @@ async function processMcpRequest(request, server) {
   
   // For now, we'll just handle the request manually
   if (request.method === 'initialize') {
+    console.error('Processing initialize request:', request.id);
+    
+    // Get the tools information
+    const toolsList = Object.keys(TOOLS).map(name => ({
+      name,
+      description: TOOLS[name].description,
+      schema: TOOLS[name].schema
+    }));
+    
+    console.error(`Returning ${toolsList.length} tools for initialize request`);
+    
     return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
         name: server.name,
         version: server.version,
-        tools: Object.keys(TOOLS).map(name => ({
-          name,
-          description: TOOLS[name].description
-        }))
+        tools: toolsList
       }
     };
   } else if (request.method === 'invoke') {

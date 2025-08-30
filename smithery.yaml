@@ -1,5 +1,5 @@
 name: mcp-keywords-everywhere
-version: 1.0.0
+version: 1.1.0
 description: MCP server for Keywords Everywhere API integration
 
 # Server configuration
@@ -10,6 +10,7 @@ server:
     path: /mcp
     port: 3000
     host: 0.0.0.0  # Binds to all network interfaces for Smithery hosting
+    timeout: 60000  # Increase timeout to 60 seconds
 
   # Session configuration
   session:
@@ -22,6 +23,16 @@ env:
     description: API key for Keywords Everywhere
     required: true
 
+# Health check configuration
+health_check:
+  path: /mcp
+  method: POST
+  body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+  headers:
+    Content-Type: application/json
+  success_status: 200
+  timeout: 30000  # 30 seconds timeout for health check
+
 # Build configuration
 build:
   command: npm ci --production
@@ -32,3 +43,5 @@ start:
   command: node index.js
   env:
     TRANSPORT_TYPE: http
+    PORT: 3000
+    HOST: 0.0.0.0
