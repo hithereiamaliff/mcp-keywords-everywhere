@@ -668,6 +668,14 @@ async function runServer() {
       req.setTimeout(30000);
       res.setTimeout(30000);
       
+      // Log the incoming request
+      console.error('Received MCP request:', {
+        headers: req.headers,
+        body: req.body,
+        method: req.method,
+        path: req.path
+      });
+      
       try {
         // Check protocol version if provided
         const protocolVersion = req.headers['mcp-protocol-version'];
@@ -720,6 +728,10 @@ async function runServer() {
           for (const request of mcpRequest) {
             try {
               const response = await processMcpRequest(request, server);
+              console.error('Sending MCP response:', {
+                sessionId,
+                response: JSON.stringify(response, null, 2)
+              });
               if (response) {
                 responses.push(response);
               }
@@ -814,17 +826,17 @@ async function processMcpRequest(request, server) {
   if (request.method === 'initialize') {
     console.error('Processing initialize request:', request.id);
     
-    // Get the tools information
+    // Get the tools information in the exact format expected by Smithery
     const toolsList = Object.keys(TOOLS).map(name => {
-      // Convert the tool's inputSchema to the format expected by Smithery
-      const schema = TOOLS[name].inputSchema ? {
-        parameters: TOOLS[name].inputSchema
-      } : undefined;
-      
+      const tool = TOOLS[name];
       return {
         name,
-        description: TOOLS[name].description,
-        schema
+        description: tool.description,
+        parameters: {
+          type: "object",
+          properties: tool.inputSchema?.properties || {},
+          required: tool.inputSchema?.required || []
+        }
       };
     });
     
