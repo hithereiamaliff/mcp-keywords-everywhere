@@ -26,24 +26,24 @@ export default function createServer({
       const url = `${BASE_URL}/${endpoint}`;
       console.error(`Calling Keywords Everywhere API: ${endpoint}`);
       
-      const config = {
+      const axiosConfig = {
         method: data ? 'post' : 'get',
         url,
         headers: {
-          "Authorization": `Bearer ${process.env.KEYWORDS_EVERYWHERE_API_KEY}`,
+          "Authorization": `Bearer ${config.KEYWORDS_EVERYWHERE_API_KEY}`,
           "Accept": "application/json"
         }
       } as any;
       
       // Handle different types of data
       if (data instanceof URLSearchParams) {
-        config.data = data;
-        config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        axiosConfig.data = data;
+        axiosConfig.headers['Content-Type'] = 'application/x-www-form-urlencoded';
       } else if (data) {
-        config.data = data;
+        axiosConfig.data = data;
       }
       
-      const response = await axios(config);
+      const response = await axios(axiosConfig);
       console.error(`API Response Status: ${response.status}`);
       
       return response.data;
