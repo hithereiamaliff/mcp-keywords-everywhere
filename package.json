@@ -2,6 +2,7 @@
   "name": "mcp-keywords-everywhere",
   "version": "1.1.0",
   "main": "index.js",
+  "module": "./src/index.ts",
   "type": "module",
   "description": "MCP server for Keywords Everywhere API integration",
   "bin": {
@@ -9,7 +10,9 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx @smithery/cli build",
+    "dev": "npx @smithery/cli dev"
   },
   "keywords": ["mcp", "keywords", "seo", "model-context-protocol"],
   "author": "hithereiamaliff",
@@ -20,6 +23,10 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@smithery/cli": "^1.0.0",
+    "tsx": "^4.0.0"
   },
   "engines": {
     "node": ">=16.0.0"

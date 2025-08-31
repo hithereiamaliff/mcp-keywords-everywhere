@@ -165,16 +165,74 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - **GitHub Issues**: [Report bugs or request features](https://github.com/hithereiamaliff/mcp-keywords-everywhere/issues)
 - **Keywords Everywhere API**: [Official documentation](https://api.keywordseverywhere.com/docs/#/)
 
+## Development and Deployment
+
+This MCP server uses TypeScript with Smithery CLI for development and deployment. The TypeScript Smithery CLI approach is the recommended migration path for MCP servers, providing built-in development tools, automatic deployment, and containerization with minimal configuration.
+
+### Prerequisites
+
+- Node.js 18+ installed
+- Keywords Everywhere API key
+
+### Project Structure
+
+```
+mcp-keywords-everywhere/
+├── src/
+│   └── index.ts          # Main server file with createServer export
+├── package.json          # Updated with Smithery CLI scripts
+├── smithery.yaml         # Smithery runtime configuration
+├── tsconfig.json         # TypeScript configuration
+└── README.md             # Documentation
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+The development server will provide a link to the Smithery playground for testing. The playground allows you to interact with your MCP server and test all available tools.
+
+### Building for Production
+
+```bash
+# Build the server
+npm run build
+
+# Push changes to GitHub for automatic deployment
+git push
+```
+
+Smithery will automatically detect changes and deploy your server. You can also manually trigger deployment from your Smithery server dashboard.
+
 ## Transport Support
 
-This MCP server supports both transport types:
+This MCP server uses the Streamable HTTP Transport, which is the recommended transport for production use, offering improved scalability, concurrency, and latency compared to STDIO transport.
 
-- **Streamable HTTP Transport**: The recommended transport for production use, offering better scalability and performance.
-- **STDIO Transport**: Legacy transport, maintained for backward compatibility.
+For detailed information about the migration from STDIO to TypeScript Smithery CLI with HTTP transport, see [MIGRATION.md](MIGRATION.md).
 
-For details on the migration from STDIO to Streamable HTTP transport, see [MIGRATION.md](MIGRATION.md).
+## Key Benefits
+
+- **Simplified Development**: Built-in development tools with hot reloading
+- **Automatic Deployment**: Push to GitHub and Smithery handles the rest
+- **No Dockerfile Needed**: Smithery CLI handles containerization
+- **Type Safety**: Full TypeScript support with proper type checking
+- **Better Performance**: HTTP transport offers improved scalability and latency
 
 ## Changelog
+
+### 2.0.0
+- Migrated to TypeScript Smithery CLI architecture
+- Converted codebase to TypeScript with proper types
+- Updated project structure to follow Smithery CLI best practices
+- Added tsconfig.json for TypeScript configuration
+- Enhanced error handling and response formatting
+- Improved development experience with hot reloading
 
 ### 1.1.0
 - Migrated from STDIO to Streamable HTTP transport

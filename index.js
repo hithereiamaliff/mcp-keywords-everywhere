@@ -635,14 +635,11 @@ async function runServer() {
     
     // Add CORS and other middleware
     app.use((req, res, next) => {
-      // Basic security: validate origin header
-      const origin = req.headers.origin;
-      if (origin) {
-        // You can implement more strict origin validation if needed
-        res.setHeader('Access-Control-Allow-Origin', origin);
-      }
+      // Allow all origins for testing purposes
+      res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version');
+      res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
       next();
     });
     
@@ -679,8 +676,12 @@ async function runServer() {
       try {
         // Check protocol version if provided
         const protocolVersion = req.headers['mcp-protocol-version'];
-        if (protocolVersion && protocolVersion !== '2025-03-26') {
+        // Accept any protocol version that starts with 2025- for compatibility
+        if (protocolVersion && !protocolVersion.startsWith('2025-')) {
+          console.error(`Unsupported protocol version: ${protocolVersion}`);
           return res.status(400).json({
+            jsonrpc: '2.0',
+            id: req.body.id,
             error: {
               code: -32600,
               message: `Unsupported protocol version: ${protocolVersion}`

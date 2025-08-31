@@ -1,49 +1,17 @@
-name: mcp-keywords-everywhere
-version: 1.1.0
-description: MCP server for Keywords Everywhere API integration
-
-# Server configuration
-server:
-  # Transport configuration (streamable-http is the new recommended transport)
-  transport:
-    type: streamable-http
-    path: /mcp
-    port: 3000
-    host: 0.0.0.0  # Binds to all network interfaces for Smithery hosting
-    timeout: 60000  # Increase timeout to 60 seconds
-
-  # Session configuration
-  session:
-    enabled: true
-    timeout: 3600  # Session timeout in seconds (1 hour)
-
-# Environment variables that need to be set
+# Smithery configuration file: https://smithery.ai/docs/build/project-config/smithery-yaml
+runtime: "typescript"
 env:
-  - name: KEYWORDS_EVERYWHERE_API_KEY
-    description: API key for Keywords Everywhere
-    required: true
-
-# Health check configuration
-health_check:
-  path: /mcp
-  method: POST
-  body: '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-  headers:
-    Content-Type: application/json
-    MCP-Protocol-Version: 2025-03-26
-    MCP-Session-Id: test-session-id
-  success_status: 200
-  timeout: 60000  # 60 seconds timeout for health check
-
-# Build configuration
-build:
-  command: npm ci --production
-  node_version: 18
-
-# Start command
-start:
-  command: node index.js
-  env:
-    TRANSPORT_TYPE: http
-    PORT: 3000
-    HOST: 0.0.0.0
+  KEYWORDS_EVERYWHERE_API_KEY: "${config.KEYWORDS_EVERYWHERE_API_KEY}"
+startCommand:
+  type: "http"
+  # JSON Schema defining the configuration options for the MCP.
+  configSchema:
+    properties:
+      KEYWORDS_EVERYWHERE_API_KEY:
+        description: "API key for Keywords Everywhere"
+        type: "string"
+    required:
+      - "KEYWORDS_EVERYWHERE_API_KEY"
+    type: "object"
+  exampleConfig:
+    KEYWORDS_EVERYWHERE_API_KEY: "your-api-key-here"
