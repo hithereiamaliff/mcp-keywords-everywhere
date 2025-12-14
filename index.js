@@ -12,11 +12,18 @@ import http from "http";
 dotenv.config();
 
 const BASE_URL = "https://api.keywordseverywhere.com/v1";
-const API_KEY = process.env.KEYWORDS_EVERYWHERE_API_KEY;
+const DEFAULT_API_KEY = process.env.KEYWORDS_EVERYWHERE_API_KEY;
 
-if (!API_KEY) {
-  console.error("Error: KEYWORDS_EVERYWHERE_API_KEY environment variable is required");
-  process.exit(1);
+// Store per-request API key (set from URL query param or header)
+let requestApiKey = null;
+
+function getApiKey() {
+  // User-provided key takes priority, fallback to default
+  return requestApiKey || DEFAULT_API_KEY;
+}
+
+if (!DEFAULT_API_KEY) {
+  console.warn("Warning: KEYWORDS_EVERYWHERE_API_KEY not set. Users must provide their own API key via URL query param.");
 }
 
 const TOOLS = {
@@ -300,6 +307,11 @@ const server = new McpServer({
 
 // Helper function for API calls
 async function makeApiCall(endpoint, data = null, retryCount = 0) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('No API key available. Please provide your Keywords Everywhere API key via URL query param (?apiKey=YOUR_KEY) or contact the server administrator.');
+  }
+  
   try {
     const url = `${BASE_URL}/${endpoint}`;
     console.error(`Calling Keywords Everywhere API: ${endpoint}`);
@@ -308,7 +320,7 @@ async function makeApiCall(endpoint, data = null, retryCount = 0) {
       method: data ? 'post' : 'get',
       url,
       headers: {
-        "Authorization": `Bearer ${API_KEY}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Accept": "application/json"
       }
     };
@@ -676,12 +688,22 @@ async function runServer() {
       req.setTimeout(30000);
       res.setTimeout(30000);
       
+      // Extract API key from query param or header (user's key takes priority over default)
+      const userApiKey = req.query.apiKey || req.headers['x-api-key'];
+      if (userApiKey) {
+        requestApiKey = userApiKey;
+        console.error('Using user-provided API key');
+      } else {
+        requestApiKey = null; // Reset to use default
+      }
+      
       // Log the incoming request
       console.error('Received MCP request:', {
         headers: req.headers,
         body: req.body,
         method: req.method,
-        path: req.path
+        path: req.path,
+        hasUserApiKey: !!userApiKey
       });
       
       try {
