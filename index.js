@@ -826,7 +826,8 @@ function generateSessionId() {
 // Helper function to process MCP requests
 async function processMcpRequest(request, server) {
   // Only handle requests with IDs (not notifications)
-  if (!request.id) {
+  // Note: id can be 0, so we check for undefined/null specifically
+  if (request.id === undefined || request.id === null) {
     return null;
   }
   
