@@ -1,7 +1,5 @@
 # Keywords Everywhere MCP Server
 
-[![smithery badge](https://smithery.ai/badge/@hithereiamaliff/mcp-keywords-everywhere)](https://smithery.ai/server/@hithereiamaliff/mcp-keywords-everywhere)
-
 A Model Context Protocol (MCP) server that provides access to the Keywords Everywhere API for SEO research and keyword analysis. This server enables AI assistants like Claude to perform keyword research, analyze search volumes, get competition data, and access various SEO metrics.
 
 Do note that this is **NOT** an official MCP server by Keywords Everywhere.
@@ -16,19 +14,47 @@ Do note that this is **NOT** an official MCP server by Keywords Everywhere.
 - **Account Management**: Check your Keywords Everywhere credit balance
 - **Multi-Country Support**: Analyze keywords across different countries and currencies
 
-## Installation
+## Quick Start (Hosted Server)
+
+The easiest way to use this MCP server is via the hosted endpoint. No installation required!
+
+### Server URL
+```
+https://mcp.techmavie.digital/keywords-everywhere/mcp
+```
+
+### Using Your Own API Key
+
+You can use your own Keywords Everywhere API key by appending it to the URL:
+```
+https://mcp.techmavie.digital/keywords-everywhere/mcp?apiKey=YOUR_API_KEY
+```
+
+Or via header: `X-API-Key: YOUR_API_KEY`
+
+### Compatible Clients
+
+This server works with any Streamable HTTP transport compatible client:
+- Claude Desktop/Mobile App
+- Claude Code
+- Cursor
+- VS Code
+- Windsurf
+- And many more
+
+## Installation (Self-Hosted)
+
+If you prefer to run your own instance:
 
 ### Prerequisites
 
-- Node.js 16.0.0 or higher
+- Node.js 18.0.0 or higher
 - A Keywords Everywhere API key (get one from [Keywords Everywhere](https://keywordseverywhere.com/))
 
-### Quick Installation (NPX)
-
-The easiest way to use this MCP server is with npx:
+### NPX (Quick Start)
 
 ```bash
-npx mcp-keywords-everywhere
+KEYWORDS_EVERYWHERE_API_KEY=your_api_key npx mcp-keywords-everywhere
 ```
 
 ### Global Installation
@@ -37,29 +63,21 @@ npx mcp-keywords-everywhere
 npm install -g mcp-keywords-everywhere
 ```
 
-### Smithery Installation
-
-You can also use this MCP server through Smithery:
-
-1. Connect to the server using the Smithery URL:
-   ```
-   server.smithery.ai/@hithereiamaliff/mcp-keywords-everywhere
-   ```
-
-2. Smithery works with any streamable HTTP transport compatible client including:
-   - Claude Desktop
-   - Claude Code
-   - Gemini CLI
-   - Raycast
-   - Cursor
-   - VS Code
-   - And many more
-
-For more information, visit [Smithery](https://smithery.ai/server/@hithereiamaliff/mcp-keywords-everywhere).
-
 ## Configuration
 
-### For Claude Desktop
+### For Claude Desktop (Hosted Server - Recommended)
+
+Simply add the server URL in Claude Desktop's MCP settings:
+```
+https://mcp.techmavie.digital/keywords-everywhere/mcp
+```
+
+To use your own API key:
+```
+https://mcp.techmavie.digital/keywords-everywhere/mcp?apiKey=YOUR_API_KEY
+```
+
+### For Claude Desktop (Self-Hosted)
 
 Add the following to your Claude Desktop configuration file:
 
@@ -80,14 +98,6 @@ Add the following to your Claude Desktop configuration file:
     }
   }
 }
-```
-
-### For Other MCP Clients
-
-If you're using other MCP clients, you can run the server directly:
-
-```bash
-KEYWORDS_EVERYWHERE_API_KEY=your_api_key_here npx mcp-keywords-everywhere
 ```
 
 ## Available Tools
@@ -167,22 +177,23 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Development and Deployment
 
-This MCP server uses TypeScript with Smithery CLI for development and deployment. The TypeScript Smithery CLI approach is the recommended migration path for MCP servers, providing built-in development tools, automatic deployment, and containerization with minimal configuration.
-
 ### Prerequisites
 
 - Node.js 18+ installed
 - Keywords Everywhere API key
+- Docker (for VPS deployment)
 
 ### Project Structure
 
 ```
 mcp-keywords-everywhere/
-├── src/
-│   └── index.ts          # Main server file with createServer export
-├── package.json          # Updated with Smithery CLI scripts
-├── smithery.yaml         # Smithery runtime configuration
-├── tsconfig.json         # TypeScript configuration
+├── index.js              # Main server file
+├── package.json          # Dependencies and scripts
+├── Dockerfile            # Docker configuration
+├── docker-compose.yml    # Docker Compose configuration
+├── deploy/               # Deployment files
+│   ├── nginx-mcp.conf    # Nginx configuration
+│   └── DEPLOYMENT.md     # Deployment guide
 └── README.md             # Documentation
 ```
 
@@ -196,48 +207,45 @@ npm install
 npm run dev
 ```
 
-The development server will provide a link to the Smithery playground for testing. The playground allows you to interact with your MCP server and test all available tools.
+### VPS Deployment
 
-### Building for Production
+This server is deployed on a VPS with Docker and Nginx reverse proxy. See [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) for detailed deployment instructions.
 
 ```bash
-# Build the server
-npm run build
+# Build and run with Docker
+docker compose up -d --build
 
-# Push changes to GitHub for automatic deployment
-git push
+# Check logs
+docker logs mcp-keywords-everywhere -f
 ```
 
-Smithery will automatically detect changes and deploy your server. You can also manually trigger deployment from your Smithery server dashboard.
+### GitHub Actions Auto-Deploy
+
+Push to `main` branch triggers automatic deployment to VPS via GitHub Actions.
 
 ## Transport Support
 
 This MCP server uses the Streamable HTTP Transport, which is the recommended transport for production use, offering improved scalability, concurrency, and latency compared to STDIO transport.
 
-For detailed information about the migration from STDIO to TypeScript Smithery CLI with HTTP transport, see [MIGRATION.md](MIGRATION.md).
-
 ## Key Benefits
 
-- **Simplified Development**: Built-in development tools with hot reloading
-- **Automatic Deployment**: Push to GitHub and Smithery handles the rest
-- **No Dockerfile Needed**: Smithery CLI handles containerization
-- **Type Safety**: Full TypeScript support with proper type checking
+- **No Installation Required**: Use the hosted server URL directly
+- **Bring Your Own API Key**: Users can provide their own Keywords Everywhere API key
 - **Better Performance**: HTTP transport offers improved scalability and latency
+- **Auto-Deploy**: Push to GitHub and changes are automatically deployed
 
 ## Changelog
 
-### 2.0.0
-- Migrated to TypeScript Smithery CLI architecture
-- Converted codebase to TypeScript with proper types
-- Updated project structure to follow Smithery CLI best practices
-- Added tsconfig.json for TypeScript configuration
-- Enhanced error handling and response formatting
-- Improved development experience with hot reloading
+### 1.2.0
+- Added hosted server at mcp.techmavie.digital
+- Added support for user-provided API keys via URL query param
+- Fixed MCP protocol compliance for Claude Desktop
+- Added Docker and VPS deployment support
+- Added GitHub Actions auto-deploy
 
 ### 1.1.0
 - Migrated from STDIO to Streamable HTTP transport
 - Added support for both transport types
-- Added smithery.yaml configuration
 - Improved session management
 - Enhanced error handling
 
