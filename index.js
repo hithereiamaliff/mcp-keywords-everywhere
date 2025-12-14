@@ -654,7 +654,18 @@ async function runServer() {
       res.status(200).end();
     });
     
-    // Add a health check endpoint
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.status(200).json({ 
+        status: 'healthy',
+        server: 'Keywords Everywhere MCP',
+        version: '1.1.0',
+        transport: 'streamable-http',
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // Add a health check endpoint (also on /mcp GET for compatibility)
     app.get('/mcp', (req, res) => {
       res.status(200).json({ status: 'ok', message: 'MCP server is running' });
     });
