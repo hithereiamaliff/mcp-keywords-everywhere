@@ -859,11 +859,90 @@ async function processMcpRequest(request, server) {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        name: server.name,
-        version: server.version,
+        protocolVersion: '2025-06-18',
+        capabilities: {
+          tools: {}
+        },
+        serverInfo: {
+          name: 'mcp-keywords-everywhere',
+          version: '1.1.0'
+        }
+      }
+    };
+  } else if (request.method === 'tools/list') {
+    console.error('Processing tools/list request:', request.id);
+    
+    const toolsList = Object.keys(TOOLS).map(name => {
+      const tool = TOOLS[name];
+      return {
+        name,
+        description: tool.description,
+        inputSchema: {
+          type: "object",
+          properties: tool.inputSchema?.properties || {},
+          required: tool.inputSchema?.required || []
+        }
+      };
+    });
+    
+    return {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
         tools: toolsList
       }
     };
+  } else if (request.method === 'tools/call') {
+    const { name: toolName, arguments: toolArgs } = request.params;
+    
+    try {
+      console.error(`Processing tools/call for: ${toolName}`, toolArgs);
+      
+      const toolDef = TOOLS[toolName];
+      if (!toolDef) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Tool not found: ${toolName}`
+          }
+        };
+      }
+      
+      const handler = handlers[toolName];
+      if (!handler) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Handler not found for tool: ${toolName}`
+          }
+        };
+      }
+      
+      const result = await handler(toolArgs || {});
+      const formattedResult = formatResponse(toolName, result);
+      
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          content: [{ type: "text", text: formattedResult }]
+        }
+      };
+    } catch (error) {
+      console.error(`Error in tools/call ${toolName}:`, error);
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          content: [{ type: "text", text: `Error: ${error.message}` }],
+          isError: true
+        }
+      };
+    }
   } else if (request.method === 'invoke') {
     const { tool, params } = request.params;
     
