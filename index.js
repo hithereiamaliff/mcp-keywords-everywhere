@@ -1006,7 +1006,9 @@ async function runServer() {
     
     async function loadData() {
       try {
-        const res = await fetch('/analytics');
+        // Use relative path to work with nginx proxy
+        const basePath = window.location.pathname.replace('/analytics/dashboard', '');
+        const res = await fetch(basePath + '/analytics');
         const data = await res.json();
         
         document.getElementById('uptime').textContent = '⏱️ Uptime: ' + data.uptime;
