@@ -9,7 +9,7 @@ services:
     container_name: mcp-keywords-everywhere
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3003:3000"
     environment:
       - PORT=3000
       - HOST=0.0.0.0
