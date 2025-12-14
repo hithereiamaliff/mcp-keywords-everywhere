@@ -23,6 +23,11 @@ The easiest way to use this MCP server is via the hosted endpoint. No installati
 https://mcp.techmavie.digital/keywords-everywhere/mcp
 ```
 
+### Analytics Dashboard
+```
+https://mcp.techmavie.digital/keywords-everywhere/analytics/dashboard
+```
+
 ### Using Your Own API Key
 
 You can use your own Keywords Everywhere API key by appending it to the URL:
@@ -242,6 +247,7 @@ This MCP server uses the Streamable HTTP Transport, which is the recommended tra
 - Fixed MCP protocol compliance for Claude Desktop
 - Added Docker and VPS deployment support
 - Added GitHub Actions auto-deploy
+- Added analytics dashboard with real-time usage statistics
 
 ### 1.1.0
 - Migrated from STDIO to Streamable HTTP transport

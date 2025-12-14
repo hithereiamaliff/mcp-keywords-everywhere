@@ -26,6 +26,79 @@ if (!DEFAULT_API_KEY) {
   console.warn("Warning: KEYWORDS_EVERYWHERE_API_KEY not set. Users must provide their own API key via URL query param.");
 }
 
+// ============================================================================
+// Analytics Tracking
+// ============================================================================
+const analytics = {
+  serverStartTime: new Date().toISOString(),
+  totalRequests: 0,
+  totalToolCalls: 0,
+  requestsByMethod: {},
+  requestsByEndpoint: {},
+  toolCalls: {},
+  recentToolCalls: [],
+  clientsByIp: {},
+  clientsByUserAgent: {},
+  hourlyRequests: {},
+};
+
+const MAX_RECENT_CALLS = 100;
+
+function trackRequest(req, endpoint) {
+  analytics.totalRequests++;
+  
+  // Track by method
+  const method = req.method;
+  analytics.requestsByMethod[method] = (analytics.requestsByMethod[method] || 0) + 1;
+  
+  // Track by endpoint
+  analytics.requestsByEndpoint[endpoint] = (analytics.requestsByEndpoint[endpoint] || 0) + 1;
+  
+  // Track by client IP
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+  analytics.clientsByIp[clientIp] = (analytics.clientsByIp[clientIp] || 0) + 1;
+  
+  // Track by user agent
+  const userAgent = req.headers['user-agent'] || 'unknown';
+  const shortAgent = userAgent.substring(0, 50);
+  analytics.clientsByUserAgent[shortAgent] = (analytics.clientsByUserAgent[shortAgent] || 0) + 1;
+  
+  // Track hourly
+  const hour = new Date().toISOString().substring(0, 13); // YYYY-MM-DDTHH
+  analytics.hourlyRequests[hour] = (analytics.hourlyRequests[hour] || 0) + 1;
+}
+
+function trackToolCall(toolName, req) {
+  analytics.totalToolCalls++;
+  analytics.toolCalls[toolName] = (analytics.toolCalls[toolName] || 0) + 1;
+  
+  const toolCall = {
+    tool: toolName,
+    timestamp: new Date().toISOString(),
+    clientIp: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+    userAgent: (req.headers['user-agent'] || 'unknown').substring(0, 50),
+  };
+  
+  analytics.recentToolCalls.unshift(toolCall);
+  if (analytics.recentToolCalls.length > MAX_RECENT_CALLS) {
+    analytics.recentToolCalls.pop();
+  }
+}
+
+function getUptime() {
+  const start = new Date(analytics.serverStartTime).getTime();
+  const now = Date.now();
+  const diff = now - start;
+  
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 const TOOLS = {
   // Account
   get_credits: {
@@ -668,22 +741,373 @@ async function runServer() {
     
     // Health check endpoint
     app.get('/health', (req, res) => {
+      trackRequest(req, '/health');
       res.status(200).json({ 
         status: 'healthy',
         server: 'Keywords Everywhere MCP',
-        version: '1.1.0',
+        version: '1.2.0',
         transport: 'streamable-http',
+        uptime: getUptime(),
         timestamp: new Date().toISOString()
       });
     });
     
+    // Analytics endpoint - summary
+    app.get('/analytics', (req, res) => {
+      trackRequest(req, '/analytics');
+      
+      // Sort tool calls by count
+      const sortedTools = Object.entries(analytics.toolCalls)
+        .sort(([, a], [, b]) => b - a)
+        .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
+      
+      // Sort clients by count
+      const sortedClients = Object.entries(analytics.clientsByIp)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 20)
+        .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
+      
+      // Get last 24 hours of hourly data
+      const last24Hours = Object.entries(analytics.hourlyRequests)
+        .sort(([a], [b]) => b.localeCompare(a))
+        .slice(0, 24)
+        .reverse()
+        .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {});
+      
+      res.json({
+        server: 'Keywords Everywhere MCP',
+        uptime: getUptime(),
+        serverStartTime: analytics.serverStartTime,
+        summary: {
+          totalRequests: analytics.totalRequests,
+          totalToolCalls: analytics.totalToolCalls,
+          uniqueClients: Object.keys(analytics.clientsByIp).length,
+        },
+        breakdown: {
+          byMethod: analytics.requestsByMethod,
+          byEndpoint: analytics.requestsByEndpoint,
+          byTool: sortedTools,
+        },
+        clients: {
+          byIp: sortedClients,
+          byUserAgent: analytics.clientsByUserAgent,
+        },
+        hourlyRequests: last24Hours,
+        recentToolCalls: analytics.recentToolCalls.slice(0, 20),
+      });
+    });
+    
+    // Analytics endpoint - detailed tool stats
+    app.get('/analytics/tools', (req, res) => {
+      trackRequest(req, '/analytics/tools');
+      
+      const sortedTools = Object.entries(analytics.toolCalls)
+        .sort(([, a], [, b]) => b - a)
+        .map(([tool, count]) => ({
+          tool,
+          count,
+          percentage: analytics.totalToolCalls > 0 
+            ? ((count / analytics.totalToolCalls) * 100).toFixed(1) + '%'
+            : '0%',
+        }));
+      
+      res.json({
+        totalToolCalls: analytics.totalToolCalls,
+        tools: sortedTools,
+        recentCalls: analytics.recentToolCalls,
+      });
+    });
+    
+    // Analytics dashboard - visual HTML page
+    app.get('/analytics/dashboard', (req, res) => {
+      trackRequest(req, '/analytics/dashboard');
+      
+      const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keywords Everywhere MCP - Analytics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      color: #e4e4e7;
+      padding: 20px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+    }
+    header h1 {
+      font-size: 2rem;
+      background: linear-gradient(90deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    header p { color: #a1a1aa; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: transform 0.2s;
+    }
+    .stat-card:hover { transform: translateY(-4px); }
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #34d399, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .stat-label { color: #a1a1aa; margin-top: 8px; font-size: 0.9rem; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .chart-card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 24px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .chart-card h3 {
+      margin-bottom: 16px;
+      color: #e4e4e7;
+      font-size: 1.1rem;
+    }
+    .chart-container { position: relative; height: 300px; }
+    .recent-calls {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 24px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .recent-calls h3 { margin-bottom: 16px; }
+    .call-list { max-height: 400px; overflow-y: auto; }
+    .call-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .call-tool {
+      font-weight: 600;
+      color: #60a5fa;
+      font-family: monospace;
+    }
+    .call-time { color: #71717a; font-size: 0.85rem; }
+    .call-client { color: #a1a1aa; font-size: 0.8rem; }
+    .refresh-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 50px;
+      cursor: pointer;
+      font-weight: 600;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+      transition: transform 0.2s;
+    }
+    .refresh-btn:hover { transform: scale(1.05); }
+    .uptime-badge {
+      display: inline-block;
+      background: rgba(52, 211, 153, 0.2);
+      color: #34d399;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      margin-top: 8px;
+    }
+    @media (max-width: 768px) {
+      .charts-grid { grid-template-columns: 1fr; }
+      .stat-value { font-size: 2rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔍 Keywords Everywhere MCP Analytics</h1>
+      <p>Real-time usage statistics for the MCP server</p>
+      <span class="uptime-badge" id="uptime">Loading...</span>
+    </header>
+    
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="totalRequests">-</div>
+        <div class="stat-label">Total Requests</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalToolCalls">-</div>
+        <div class="stat-label">Tool Calls</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="uniqueClients">-</div>
+        <div class="stat-label">Unique Clients</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="topTool">-</div>
+        <div class="stat-label">Most Used Tool</div>
+      </div>
+    </div>
+    
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>📊 Tool Usage Distribution</h3>
+        <div class="chart-container">
+          <canvas id="toolsChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>📈 Hourly Requests (Last 24h)</h3>
+        <div class="chart-container">
+          <canvas id="hourlyChart"></canvas>
+        </div>
+      </div>
+    </div>
+    
+    <div class="recent-calls">
+      <h3>🕐 Recent Tool Calls</h3>
+      <div class="call-list" id="recentCalls">Loading...</div>
+    </div>
+  </div>
+  
+  <button class="refresh-btn" onclick="loadData()">🔄 Refresh</button>
+  
+  <script>
+    let toolsChart, hourlyChart;
+    
+    async function loadData() {
+      try {
+        const res = await fetch('/analytics');
+        const data = await res.json();
+        
+        document.getElementById('uptime').textContent = '⏱️ Uptime: ' + data.uptime;
+        document.getElementById('totalRequests').textContent = data.summary.totalRequests.toLocaleString();
+        document.getElementById('totalToolCalls').textContent = data.summary.totalToolCalls.toLocaleString();
+        document.getElementById('uniqueClients').textContent = data.summary.uniqueClients.toLocaleString();
+        
+        const tools = Object.entries(data.breakdown.byTool);
+        if (tools.length > 0) {
+          document.getElementById('topTool').textContent = tools[0][0].replace('get_', '');
+        }
+        
+        // Tools chart
+        const toolLabels = tools.slice(0, 8).map(([k]) => k.replace('get_', ''));
+        const toolValues = tools.slice(0, 8).map(([, v]) => v);
+        
+        if (toolsChart) toolsChart.destroy();
+        toolsChart = new Chart(document.getElementById('toolsChart'), {
+          type: 'doughnut',
+          data: {
+            labels: toolLabels,
+            datasets: [{
+              data: toolValues,
+              backgroundColor: ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#f43f5e', '#84cc16']
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { color: '#a1a1aa' } } }
+          }
+        });
+        
+        // Hourly chart
+        const hourlyData = Object.entries(data.hourlyRequests);
+        const hourLabels = hourlyData.map(([k]) => k.substring(11) + ':00');
+        const hourValues = hourlyData.map(([, v]) => v);
+        
+        if (hourlyChart) hourlyChart.destroy();
+        hourlyChart = new Chart(document.getElementById('hourlyChart'), {
+          type: 'line',
+          data: {
+            labels: hourLabels,
+            datasets: [{
+              label: 'Requests',
+              data: hourValues,
+              borderColor: '#60a5fa',
+              backgroundColor: 'rgba(96, 165, 250, 0.1)',
+              fill: true,
+              tension: 0.4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { color: '#71717a' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: '#71717a' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+        
+        // Recent calls
+        const callsHtml = data.recentToolCalls.map(call => \`
+          <div class="call-item">
+            <div>
+              <span class="call-tool">\${call.tool}</span>
+              <span class="call-client">\${call.userAgent}</span>
+            </div>
+            <span class="call-time">\${new Date(call.timestamp).toLocaleTimeString()}</span>
+          </div>
+        \`).join('');
+        document.getElementById('recentCalls').innerHTML = callsHtml || '<p style="color:#71717a">No tool calls yet</p>';
+        
+      } catch (err) {
+        console.error('Failed to load analytics:', err);
+      }
+    }
+    
+    loadData();
+    setInterval(loadData, 30000);
+  </script>
+</body>
+</html>`;
+      
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    });
+    
     // Add a health check endpoint (also on /mcp GET for compatibility)
     app.get('/mcp', (req, res) => {
+      trackRequest(req, '/mcp');
       res.status(200).json({ status: 'ok', message: 'MCP server is running' });
     });
     
     // Implement the MCP endpoint for Streamable HTTP transport
     app.post('/mcp', async (req, res) => {
+      // Track request for analytics
+      trackRequest(req, '/mcp');
+      
       // Set a longer timeout for the response
       req.setTimeout(30000);
       res.setTimeout(30000);
@@ -761,7 +1185,7 @@ async function runServer() {
           
           for (const request of mcpRequest) {
             try {
-              const response = await processMcpRequest(request, server);
+              const response = await processMcpRequest(request, server, req);
               console.error('Sending MCP response:', {
                 sessionId,
                 response: JSON.stringify(response, null, 2)
@@ -791,7 +1215,7 @@ async function runServer() {
         } else {
           // Handle single request
           try {
-            const response = await processMcpRequest(mcpRequest, server);
+            const response = await processMcpRequest(mcpRequest, server, req);
             
             // If this is an initialization request, set the session ID header
             if (mcpRequest.method === 'initialize') {
@@ -846,7 +1270,7 @@ function generateSessionId() {
 }
 
 // Helper function to process MCP requests
-async function processMcpRequest(request, server) {
+async function processMcpRequest(request, server, expressReq = null) {
   // Only handle requests with IDs (not notifications)
   // Note: id can be 0, so we check for undefined/null specifically
   if (request.id === undefined || request.id === null) {
@@ -916,6 +1340,11 @@ async function processMcpRequest(request, server) {
     };
   } else if (request.method === 'tools/call') {
     const { name: toolName, arguments: toolArgs } = request.params;
+    
+    // Track tool call for analytics
+    if (expressReq) {
+      trackToolCall(toolName, expressReq);
+    }
     
     try {
       console.error(`Processing tools/call for: ${toolName}`, toolArgs);
