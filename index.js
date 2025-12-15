@@ -7,6 +7,8 @@ import axios from "axios";
 import { z } from "zod";
 import dotenv from "dotenv";
 import http from "http";
+import fs from "fs";
+import path from "path";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -27,9 +29,11 @@ if (!DEFAULT_API_KEY) {
 }
 
 // ============================================================================
-// Analytics Tracking
+// Analytics Tracking with File Persistence
 // ============================================================================
-const analytics = {
+const ANALYTICS_FILE = process.env.ANALYTICS_FILE || '/app/data/keywords-everywhere-analytics.json';
+
+const defaultAnalytics = {
   serverStartTime: new Date().toISOString(),
   totalRequests: 0,
   totalToolCalls: 0,
@@ -39,10 +43,96 @@ const analytics = {
   recentToolCalls: [],
   clientsByIp: {},
   clientsByUserAgent: {},
+  clientsByApp: {},
   hourlyRequests: {},
 };
 
 const MAX_RECENT_CALLS = 100;
+
+// Load analytics from file or use defaults
+function loadAnalytics() {
+  try {
+    if (fs.existsSync(ANALYTICS_FILE)) {
+      const data = fs.readFileSync(ANALYTICS_FILE, 'utf-8');
+      const loaded = JSON.parse(data);
+      console.error(`📊 Loaded analytics from ${ANALYTICS_FILE}`);
+      // Ensure clientsByApp exists (for backwards compatibility)
+      if (!loaded.clientsByApp) {
+        loaded.clientsByApp = {};
+      }
+      return loaded;
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not load analytics file, starting fresh:', error.message);
+  }
+  return { ...defaultAnalytics };
+}
+
+// Save analytics to file
+function saveAnalytics() {
+  try {
+    const dir = path.dirname(ANALYTICS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(ANALYTICS_FILE, JSON.stringify(analytics, null, 2));
+    console.error(`📊 Saved analytics to ${ANALYTICS_FILE}`);
+  } catch (error) {
+    console.warn('⚠️ Could not save analytics file:', error.message);
+  }
+}
+
+// Auto-save analytics every 5 minutes
+setInterval(saveAnalytics, 5 * 60 * 1000);
+
+// Save on process exit
+process.on('SIGTERM', () => {
+  console.error('📊 Saving analytics before shutdown...');
+  saveAnalytics();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.error('📊 Saving analytics before shutdown...');
+  saveAnalytics();
+  process.exit(0);
+});
+
+const analytics = loadAnalytics();
+
+// Parse app name from user agent
+function parseAppFromUserAgent(userAgent) {
+  if (!userAgent || userAgent === 'unknown') return 'Unknown';
+  
+  const ua = userAgent.toLowerCase();
+  
+  // Claude Desktop
+  if (ua.includes('claude') || ua.includes('anthropic')) return 'Claude Desktop';
+  // Cursor
+  if (ua.includes('cursor')) return 'Cursor';
+  // Windsurf
+  if (ua.includes('windsurf') || ua.includes('codeium')) return 'Windsurf';
+  // VS Code
+  if (ua.includes('vscode') || ua.includes('visual studio code')) return 'VS Code';
+  // Continue
+  if (ua.includes('continue')) return 'Continue';
+  // MCP Inspector
+  if (ua.includes('mcp-inspector') || ua.includes('inspector')) return 'MCP Inspector';
+  // Node.js (likely programmatic)
+  if (ua.includes('node')) return 'Node.js';
+  // Python
+  if (ua.includes('python')) return 'Python';
+  // curl
+  if (ua.includes('curl')) return 'curl';
+  // Postman
+  if (ua.includes('postman')) return 'Postman';
+  // Browser-based
+  if (ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari') || ua.includes('firefox')) return 'Browser';
+  
+  // Extract first part of user agent as app name
+  const firstPart = userAgent.split('/')[0] || userAgent.split(' ')[0];
+  return firstPart.substring(0, 20) || 'Unknown';
+}
 
 function trackRequest(req, endpoint) {
   analytics.totalRequests++;
@@ -62,6 +152,10 @@ function trackRequest(req, endpoint) {
   const userAgent = req.headers['user-agent'] || 'unknown';
   const shortAgent = userAgent.substring(0, 50);
   analytics.clientsByUserAgent[shortAgent] = (analytics.clientsByUserAgent[shortAgent] || 0) + 1;
+  
+  // Track by app (parsed from user agent)
+  const appName = parseAppFromUserAgent(userAgent);
+  analytics.clientsByApp[appName] = (analytics.clientsByApp[appName] || 0) + 1;
   
   // Track hourly
   const hour = new Date().toISOString().substring(0, 13); // YYYY-MM-DDTHH
@@ -791,6 +885,7 @@ async function runServer() {
         clients: {
           byIp: sortedClients,
           byUserAgent: analytics.clientsByUserAgent,
+          byApp: analytics.clientsByApp || {},
         },
         hourlyRequests: last24Hours,
         recentToolCalls: analytics.recentToolCalls.slice(0, 20),
@@ -921,6 +1016,18 @@ async function runServer() {
     }
     .call-time { color: #71717a; font-size: 0.85rem; }
     .call-client { color: #a1a1aa; font-size: 0.8rem; }
+    .ip-list { max-height: 300px; overflow-y: auto; }
+    .ip-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .ip-addr { font-family: monospace; color: #60a5fa; }
+    .ip-count { color: #71717a; font-size: 0.85rem; }
     .refresh-btn {
       position: fixed;
       bottom: 20px;
@@ -991,6 +1098,16 @@ async function runServer() {
           <canvas id="hourlyChart"></canvas>
         </div>
       </div>
+      <div class="chart-card">
+        <h3>📱 Clients by App</h3>
+        <div class="chart-container">
+          <canvas id="appsChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>🌐 Top Client IPs</h3>
+        <div class="ip-list" id="topIps">Loading...</div>
+      </div>
     </div>
     
     <div class="recent-calls">
@@ -1002,7 +1119,7 @@ async function runServer() {
   <button class="refresh-btn" onclick="loadData()">🔄 Refresh</button>
   
   <script>
-    let toolsChart, hourlyChart;
+    let toolsChart, hourlyChart, appsChart;
     
     async function loadData() {
       try {
@@ -1071,6 +1188,43 @@ async function runServer() {
             plugins: { legend: { display: false } }
           }
         });
+        
+        // Apps chart
+        const apps = Object.entries(data.clients.byApp || {}).sort(([,a], [,b]) => b - a);
+        const appLabels = apps.slice(0, 8).map(([k]) => k);
+        const appValues = apps.slice(0, 8).map(([, v]) => v);
+        
+        if (appsChart) appsChart.destroy();
+        appsChart = new Chart(document.getElementById('appsChart'), {
+          type: 'bar',
+          data: {
+            labels: appLabels,
+            datasets: [{
+              data: appValues,
+              backgroundColor: ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#f43f5e', '#84cc16']
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#71717a' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: '#a1a1aa' }, grid: { display: false } }
+            }
+          }
+        });
+        
+        // Top IPs list
+        const ips = Object.entries(data.clients.byIp || {}).slice(0, 10);
+        const ipsHtml = ips.map(([ip, count]) => \`
+          <div class="ip-item">
+            <span class="ip-addr">\${ip}</span>
+            <span class="ip-count">\${count} requests</span>
+          </div>
+        \`).join('');
+        document.getElementById('topIps').innerHTML = ipsHtml || '<p style="color:#71717a">No clients yet</p>';
         
         // Recent calls
         const callsHtml = data.recentToolCalls.map(call => \`
