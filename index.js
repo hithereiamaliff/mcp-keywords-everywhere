@@ -816,8 +816,8 @@ async function runServer() {
     app.use((req, res, next) => {
       // Allow all origins for testing purposes
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version');
       res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
       next();
     });
@@ -1257,6 +1257,38 @@ async function runServer() {
     app.get('/mcp', (req, res) => {
       trackRequest(req, '/mcp');
       res.status(200).json({ status: 'ok', message: 'MCP server is running' });
+    });
+    
+    // Handle DELETE requests for session termination
+    app.delete('/mcp', (req, res) => {
+      trackRequest(req, '/mcp');
+      
+      const sessionId = req.headers['mcp-session-id'];
+      
+      if (!sessionId) {
+        return res.status(400).json({
+          error: {
+            code: -32002,
+            message: 'Session ID required'
+          }
+        });
+      }
+      
+      if (sessions.has(sessionId)) {
+        sessions.delete(sessionId);
+        console.error(`Session terminated: ${sessionId}`);
+        return res.status(200).json({
+          status: 'ok',
+          message: 'Session terminated successfully'
+        });
+      } else {
+        return res.status(404).json({
+          error: {
+            code: -32000,
+            message: 'Session not found'
+          }
+        });
+      }
     });
     
     // Implement the MCP endpoint for Streamable HTTP transport
