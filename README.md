@@ -1,5 +1,7 @@
 # Keywords Everywhere MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@hithereiamaliff/mcp-keywords-everywhere)](https://smithery.ai/server/@hithereiamaliff/mcp-keywords-everywhere)
+
 A Model Context Protocol (MCP) server that provides access to the Keywords Everywhere API for SEO research and keyword analysis. This server enables AI assistants like Claude to perform keyword research, analyze search volumes, get competition data, and access various SEO metrics.
 
 Do note that this is **NOT** an official MCP server by Keywords Everywhere.
