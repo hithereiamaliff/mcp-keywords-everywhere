@@ -2,16 +2,22 @@
 runtime: "typescript"
 env:
   KEYWORDS_EVERYWHERE_API_KEY: "${config.KEYWORDS_EVERYWHERE_API_KEY}"
+  KEY_SERVICE_URL: "${config.KEY_SERVICE_URL}"
+  KEY_SERVICE_TOKEN: "${config.KEY_SERVICE_TOKEN}"
 startCommand:
   type: "http"
   # JSON Schema defining the configuration options for the MCP.
   configSchema:
     properties:
       KEYWORDS_EVERYWHERE_API_KEY:
-        description: "API key for Keywords Everywhere"
+        description: "API key for Keywords Everywhere (optional if using key service)"
         type: "string"
-    required:
-      - "KEYWORDS_EVERYWHERE_API_KEY"
+      KEY_SERVICE_URL:
+        description: "URL of the key service for resolving usr_XXX keys (optional)"
+        type: "string"
+      KEY_SERVICE_TOKEN:
+        description: "Bearer token for authenticating with the key service (optional)"
+        type: "string"
     type: "object"
   exampleConfig:
     KEYWORDS_EVERYWHERE_API_KEY: "your-api-key-here"

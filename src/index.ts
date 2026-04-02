@@ -4,7 +4,9 @@ import axios from "axios";
 
 // Configuration schema for smithery.yaml
 export const configSchema = z.object({
-  KEYWORDS_EVERYWHERE_API_KEY: z.string().describe("API key for Keywords Everywhere")
+  KEYWORDS_EVERYWHERE_API_KEY: z.string().optional().describe("API key for Keywords Everywhere (optional if using key service)"),
+  KEY_SERVICE_URL: z.string().optional().describe("URL of the key service for resolving usr_XXX keys"),
+  KEY_SERVICE_TOKEN: z.string().optional().describe("Bearer token for authenticating with the key service"),
 });
 
 // Constants

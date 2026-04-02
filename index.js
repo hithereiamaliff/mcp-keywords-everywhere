@@ -16,16 +16,164 @@ dotenv.config();
 const BASE_URL = "https://api.keywordseverywhere.com/v1";
 const DEFAULT_API_KEY = process.env.KEYWORDS_EVERYWHERE_API_KEY;
 
-// Store per-request API key (set from URL query param or header)
-let requestApiKey = null;
+// Key service configuration (for managed/hosted deployments)
+const KEY_SERVICE_URL = process.env.KEY_SERVICE_URL || null;
+const KEY_SERVICE_TOKEN = process.env.KEY_SERVICE_TOKEN || null;
 
-function getApiKey() {
-  // User-provided key takes priority, fallback to default
-  return requestApiKey || DEFAULT_API_KEY;
+// Validate KEY_SERVICE_URL and KEY_SERVICE_TOKEN are both set or both unset
+if ((KEY_SERVICE_URL && !KEY_SERVICE_TOKEN) || (!KEY_SERVICE_URL && KEY_SERVICE_TOKEN)) {
+  console.error("Error: KEY_SERVICE_URL and KEY_SERVICE_TOKEN must both be set or both be unset.");
+  process.exit(1);
 }
 
-if (!DEFAULT_API_KEY) {
-  console.warn("Warning: KEYWORDS_EVERYWHERE_API_KEY not set. Users must provide their own API key via URL query param.");
+if (!DEFAULT_API_KEY && !KEY_SERVICE_URL) {
+  console.warn("Warning: Neither KEYWORDS_EVERYWHERE_API_KEY nor KEY_SERVICE_URL is set. Users must provide their own API key.");
+}
+
+// Custom error class for key-service failures with proper HTTP status codes
+class KeyServiceError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'KeyServiceError';
+    this.statusCode = statusCode;
+  }
+}
+
+// Key service cache: Map<userKey, { apiKey, expiresAt }>
+const keyServiceCache = new Map();
+const KEY_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+// Deduplication: Map<userKey, Promise<string>>
+const pendingKeyResolutions = new Map();
+
+/**
+ * Resolve a usr_XXX key to an actual API key via the key service.
+ * Implements caching (60s TTL) and deduplication of concurrent requests.
+ * @param {string} userKey - The usr_XXX key to resolve
+ * @returns {Promise<string>} The resolved Keywords Everywhere API key
+ */
+async function resolveKeyFromService(userKey) {
+  if (!KEY_SERVICE_URL) {
+    throw new KeyServiceError(503, 'Key service not configured. Set KEY_SERVICE_URL and KEY_SERVICE_TOKEN environment variables.');
+  }
+
+  // Check cache first
+  const cached = keyServiceCache.get(userKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.apiKey;
+  }
+
+  // Deduplicate concurrent requests for the same key
+  if (pendingKeyResolutions.has(userKey)) {
+    return pendingKeyResolutions.get(userKey);
+  }
+
+  const promise = (async () => {
+    try {
+      const response = await axios.post(KEY_SERVICE_URL, { key: userKey }, {
+        headers: {
+          'Authorization': `Bearer ${KEY_SERVICE_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+        validateStatus: () => true, // handle all status codes ourselves
+      });
+
+      if (response.status === 401 || response.status === 404) {
+        throw new KeyServiceError(403, 'Invalid or expired user key');
+      }
+
+      // 403 here means the MCP server itself is not authorized to use the key service.
+      if (response.status === 403) {
+        throw new KeyServiceError(503, 'Key service temporarily unavailable');
+      }
+
+      if (response.status !== 200) {
+        throw new KeyServiceError(503, 'Key service temporarily unavailable');
+      }
+
+      if (!response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+        throw new KeyServiceError(502, 'Key service returned malformed response');
+      }
+
+      if (response.data.valid === false) {
+        throw new KeyServiceError(403, 'Invalid or expired user key');
+      }
+
+      if (response.data.valid !== true) {
+        throw new KeyServiceError(502, 'Key service returned malformed response');
+      }
+
+      const apiKey = response.data.credentials?.apiKey;
+      if (!apiKey) {
+        throw new KeyServiceError(502, 'Key service returned incomplete credentials');
+      }
+
+      // Cache the result
+      keyServiceCache.set(userKey, {
+        apiKey,
+        expiresAt: Date.now() + KEY_CACHE_TTL_MS,
+      });
+
+      return apiKey;
+    } catch (err) {
+      if (err instanceof KeyServiceError) throw err;
+      // Network error, timeout, etc.
+      throw new KeyServiceError(503, 'Key service temporarily unavailable');
+    } finally {
+      pendingKeyResolutions.delete(userKey);
+    }
+  })();
+
+  pendingKeyResolutions.set(userKey, promise);
+  return promise;
+}
+
+/** Returns true if the key looks like a key-service user key (usr_XXX format). */
+function isUserKey(key) {
+  return key && typeof key === 'string' && key.startsWith('usr_');
+}
+
+/** Mask /mcp/usr_XXXX paths to /mcp/:userKey for safe logging. */
+function maskPath(p) {
+  return p.replace(/\/mcp\/usr_[^\/?]+/, '/mcp/:userKey');
+}
+
+/**
+ * Resolve the effective API key for a request.
+ * Priority:
+ *   1. usr_XXX key from path param (:userKey) → resolve via key service
+ *   2. usr_XXX key from api_key query param → resolve via key service
+ *   3. x-api-key header (self-hosted mode)
+ *   4. DEFAULT_API_KEY from environment (STDIO / self-hosted fallback)
+ *   5. null (caller decides whether to fail)
+ */
+async function resolveApiKeyForRequest(req) {
+  // 1. Path param (from /mcp/:userKey route)
+  const pathKey = req.params?.userKey;
+  if (pathKey && isUserKey(pathKey)) {
+    return resolveKeyFromService(pathKey);
+  }
+
+  // 2. api_key query param (snake_case, for key-service keys)
+  const queryApiKey = req.query?.api_key;
+  if (queryApiKey && isUserKey(queryApiKey)) {
+    return resolveKeyFromService(queryApiKey);
+  }
+
+  // 3. x-api-key header (self-hosted mode)
+  const headerKey = req.headers?.['x-api-key'];
+  if (headerKey) {
+    return headerKey;
+  }
+
+  // 4. Fallback to environment variable
+  if (DEFAULT_API_KEY) {
+    return DEFAULT_API_KEY;
+  }
+
+  // 5. No key found
+  return null;
 }
 
 // ============================================================================
@@ -473,10 +621,9 @@ const server = new McpServer({
 });
 
 // Helper function for API calls
-async function makeApiCall(endpoint, data = null, retryCount = 0) {
-  const apiKey = getApiKey();
+async function makeApiCall(endpoint, data = null, retryCount = 0, apiKey = null) {
   if (!apiKey) {
-    throw new Error('No API key available. Please provide your Keywords Everywhere API key via URL query param (?apiKey=YOUR_KEY) or contact the server administrator.');
+    throw new Error('No API key available. Provide a key via URL path (/mcp/usr_XXX), query param (?api_key=usr_XXX), x-api-key header, or set KEYWORDS_EVERYWHERE_API_KEY environment variable.');
   }
   
   try {
@@ -543,7 +690,7 @@ async function makeApiCall(endpoint, data = null, retryCount = 0) {
         const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
         console.error(`Rate limited. Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        return makeApiCall(endpoint, data, retryCount + 1);
+        return makeApiCall(endpoint, data, retryCount + 1, apiKey);
       } else {
         throw new Error(`Rate limit exceeded (429): Too many requests. Please try again later.`);
       }
@@ -554,121 +701,121 @@ async function makeApiCall(endpoint, data = null, retryCount = 0) {
   }
 }
 
-// API endpoint handlers
+// API endpoint handlers — each receives (args, apiKey) and passes apiKey to makeApiCall
 const handlers = {
   // Account
-  get_credits: async () => makeApiCall("account/credits"),
-  
+  get_credits: async (args, apiKey) => makeApiCall("account/credits", null, 0, apiKey),
+
   // Countries and Currencies
-  get_countries: async () => makeApiCall("countries"),
-  get_currencies: async () => makeApiCall("currencies"),
-  
+  get_countries: async (args, apiKey) => makeApiCall("countries", null, 0, apiKey),
+  get_currencies: async (args, apiKey) => makeApiCall("currencies", null, 0, apiKey),
+
   // Keyword Data
-  get_keyword_data: async (args) => {
+  get_keyword_data: async (args, apiKey) => {
     // Keywords Everywhere API expects "kw[]" format for each keyword
     const params = new URLSearchParams();
-    
+
     // Add each keyword individually to match API expectations
     if (Array.isArray(args.keywords)) {
       args.keywords.forEach(keyword => {
         params.append("kw[]", keyword);
       });
     }
-    
+
     // Add other parameters
     params.append("country", args.country || "");  // Default to global if not specified
     params.append("currency", args.currency || "myr");  // Default to Malaysian Ringgit
     params.append("dataSource", "cli");  // Use Google Keyword Planner & Clickstream data
-    
-    return makeApiCall("get_keyword_data", params);
+
+    return makeApiCall("get_keyword_data", params, 0, apiKey);
   },
 
   // Related Keywords
-  get_related_keywords: async (args) => {
+  get_related_keywords: async (args, apiKey) => {
     const data = {
       keyword: args.keyword,
       num: args.num || 10
     };
-    return makeApiCall("get_related_keywords", data);
+    return makeApiCall("get_related_keywords", data, 0, apiKey);
   },
 
   // PASF Keywords
-  get_pasf_keywords: async (args) => {
+  get_pasf_keywords: async (args, apiKey) => {
     const data = {
       keyword: args.keyword,
       num: args.num || 10
     };
-    return makeApiCall("get_pasf_keywords", data);
+    return makeApiCall("get_pasf_keywords", data, 0, apiKey);
   },
 
   // Domain Keywords
-  get_domain_keywords: async (args) => {
+  get_domain_keywords: async (args, apiKey) => {
     const data = {
       domain: args.domain,
       country: args.country || "",
       num: args.num || 10
     };
-    return makeApiCall("get_domain_keywords", data);
+    return makeApiCall("get_domain_keywords", data, 0, apiKey);
   },
 
   // URL Keywords
-  get_url_keywords: async (args) => {
+  get_url_keywords: async (args, apiKey) => {
     const data = {
       url: args.url,
       country: args.country || "",
       num: args.num || 10
     };
-    return makeApiCall("get_url_keywords", data);
+    return makeApiCall("get_url_keywords", data, 0, apiKey);
   },
 
   // Traffic Metrics
-  get_domain_traffic: async (args) => {
+  get_domain_traffic: async (args, apiKey) => {
     const data = {
       domain: args.domain,
       country: args.country || ""
     };
-    return makeApiCall("get_domain_traffic", data);
+    return makeApiCall("get_domain_traffic", data, 0, apiKey);
   },
 
-  get_url_traffic: async (args) => {
+  get_url_traffic: async (args, apiKey) => {
     const data = {
       url: args.url,
       country: args.country || ""
     };
-    return makeApiCall("get_url_traffic", data);
+    return makeApiCall("get_url_traffic", data, 0, apiKey);
   },
 
   // Backlinks
-  get_domain_backlinks: async (args) => {
+  get_domain_backlinks: async (args, apiKey) => {
     const data = {
       domain: args.domain,
       num: args.num || 10
     };
-    return makeApiCall("get_domain_backlinks", data);
+    return makeApiCall("get_domain_backlinks", data, 0, apiKey);
   },
 
-  get_unique_domain_backlinks: async (args) => {
+  get_unique_domain_backlinks: async (args, apiKey) => {
     const data = {
       domain: args.domain,
       num: args.num || 10
     };
-    return makeApiCall("get_unique_domain_backlinks", data);
+    return makeApiCall("get_unique_domain_backlinks", data, 0, apiKey);
   },
 
-  get_page_backlinks: async (args) => {
+  get_page_backlinks: async (args, apiKey) => {
     const data = {
       url: args.url,
       num: args.num || 10
     };
-    return makeApiCall("get_page_backlinks", data);
+    return makeApiCall("get_page_backlinks", data, 0, apiKey);
   },
 
-  get_unique_page_backlinks: async (args) => {
+  get_unique_page_backlinks: async (args, apiKey) => {
     const data = {
       url: args.url,
       num: args.num || 10
     };
-    return makeApiCall("get_unique_page_backlinks", data);
+    return makeApiCall("get_unique_page_backlinks", data, 0, apiKey);
   }
 };
 
@@ -776,7 +923,7 @@ Object.entries(TOOLS).forEach(([name, tool]) => {
     jsonSchemaToZod(tool.inputSchema),
     async (args) => {
       try {
-        const result = await handlers[name](args);
+        const result = await handlers[name](args, DEFAULT_API_KEY);
         const formattedResult = formatResponse(name, result);
         return { 
           content: [{ type: "text", text: formattedResult }], 
@@ -817,7 +964,7 @@ async function runServer() {
       // Allow all origins for testing purposes
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, X-Api-Key');
       res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
       next();
     });
@@ -830,6 +977,9 @@ async function runServer() {
     
     // Handle preflight requests
     app.options('/mcp', (req, res) => {
+      res.status(200).end();
+    });
+    app.options('/mcp/:userKey', (req, res) => {
       res.status(200).end();
     });
     
@@ -1258,13 +1408,17 @@ async function runServer() {
       trackRequest(req, '/mcp');
       res.status(200).json({ status: 'ok', message: 'MCP server is running' });
     });
-    
-    // Handle DELETE requests for session termination
-    app.delete('/mcp', (req, res) => {
+    app.get('/mcp/:userKey', (req, res) => {
       trackRequest(req, '/mcp');
-      
+      res.status(200).json({ status: 'ok', message: 'MCP server is running' });
+    });
+
+    // Handle DELETE requests for session termination
+    function handleMcpDelete(req, res) {
+      trackRequest(req, '/mcp');
+
       const sessionId = req.headers['mcp-session-id'];
-      
+
       if (!sessionId) {
         return res.status(400).json({
           error: {
@@ -1273,7 +1427,7 @@ async function runServer() {
           }
         });
       }
-      
+
       if (sessions.has(sessionId)) {
         sessions.delete(sessionId);
         console.error(`Session terminated: ${sessionId}`);
@@ -1289,35 +1443,48 @@ async function runServer() {
           }
         });
       }
-    });
+    }
+    app.delete('/mcp', handleMcpDelete);
+    app.delete('/mcp/:userKey', handleMcpDelete);
     
-    // Implement the MCP endpoint for Streamable HTTP transport
-    app.post('/mcp', async (req, res) => {
-      // Track request for analytics
+    // Shared MCP POST handler — used by both /mcp and /mcp/:userKey routes
+    async function handleMcpPost(req, res) {
+      // Track request for analytics (normalized path — never log raw usr_XXX keys)
       trackRequest(req, '/mcp');
-      
+
       // Set a longer timeout for the response
       req.setTimeout(30000);
       res.setTimeout(30000);
-      
-      // Extract API key from query param or header (user's key takes priority over default)
-      const userApiKey = req.query.apiKey || req.headers['x-api-key'];
-      if (userApiKey) {
-        requestApiKey = userApiKey;
-        console.error('Using user-provided API key');
-      } else {
-        requestApiKey = null; // Reset to use default
+
+      // Resolve API key up front — fail fast on bad usr_XXX keys (matches sibling server behavior)
+      try {
+        req.resolvedApiKey = await resolveApiKeyForRequest(req);
+      } catch (err) {
+        if (err instanceof KeyServiceError) {
+          console.error(`Key resolution failed (${err.statusCode}): ${err.message}`);
+          return res.status(err.statusCode).json({
+            jsonrpc: '2.0',
+            error: { code: -32600, message: err.message },
+            id: null,
+          });
+        }
+        console.error('Unexpected error resolving API key:', err);
+        return res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error' },
+          id: null,
+        });
       }
-      
-      // Log the incoming request
+
+      // Log the incoming request (sanitized — no headers, query params, or raw paths)
       console.error('Received MCP request:', {
-        headers: req.headers,
-        body: req.body,
         method: req.method,
-        path: req.path,
-        hasUserApiKey: !!userApiKey
+        path: maskPath(req.path),
+        hasResolvedApiKey: !!req.resolvedApiKey,
+        sessionId: req.headers['mcp-session-id'] || 'none',
+        bodyMethod: req.body?.method,
       });
-      
+
       try {
         // Check protocol version if provided
         const protocolVersion = req.headers['mcp-protocol-version'];
@@ -1333,11 +1500,11 @@ async function runServer() {
             }
           });
         }
-        
+
         // Get or create session
         let sessionId = req.headers['mcp-session-id'];
         let session;
-        
+
         if (sessionId && sessions.has(sessionId)) {
           session = sessions.get(sessionId);
         } else if (!sessionId && req.body.method === 'initialize') {
@@ -1362,15 +1529,15 @@ async function runServer() {
             }
           });
         }
-        
+
         // Process the MCP request
         const mcpRequest = req.body;
-        
+
         // Handle JSON-RPC batch requests
         if (Array.isArray(mcpRequest)) {
           // For simplicity, we'll process each request sequentially
           const responses = [];
-          
+
           for (const request of mcpRequest) {
             try {
               const response = await processMcpRequest(request, server, req);
@@ -1392,31 +1559,32 @@ async function runServer() {
               });
             }
           }
-          
+
           // If this is an initialization request, set the session ID header
           if (mcpRequest.some(req => req.method === 'initialize')) {
             res.setHeader('Mcp-Session-Id', sessionId);
           }
-          
+
           // Return the batch response
           return res.json(responses);
         } else {
           // Handle single request
           try {
             const response = await processMcpRequest(mcpRequest, server, req);
-            
+
             // If this is an initialization request, set the session ID header
             if (mcpRequest.method === 'initialize') {
               res.setHeader('Mcp-Session-Id', sessionId);
             }
-            
+
             if (response) {
               return res.json(response);
             } else {
               return res.status(202).end();
             }
           } catch (error) {
-            return res.status(500).json({
+            const status = (error instanceof KeyServiceError) ? error.statusCode : 500;
+            return res.status(status).json({
               jsonrpc: '2.0',
               id: mcpRequest.id,
               error: {
@@ -1428,14 +1596,19 @@ async function runServer() {
         }
       } catch (error) {
         console.error('Error processing request:', error);
-        return res.status(500).json({
+        const status = (error instanceof KeyServiceError) ? error.statusCode : 500;
+        return res.status(status).json({
           error: {
             code: -32603,
-            message: 'Internal server error'
+            message: (error instanceof KeyServiceError) ? error.message : 'Internal server error'
           }
         });
       }
-    });
+    }
+
+    // Register the MCP POST endpoint
+    app.post('/mcp', handleMcpPost);
+    app.post('/mcp/:userKey', handleMcpPost);
     
     // Start the HTTP server
     await new Promise((resolve, reject) => {
@@ -1561,7 +1734,7 @@ async function processMcpRequest(request, server, expressReq = null) {
         };
       }
       
-      const result = await handler(toolArgs || {});
+      const result = await handler(toolArgs || {}, expressReq?.resolvedApiKey);
       const formattedResult = formatResponse(toolName, result);
       
       return {
@@ -1617,7 +1790,7 @@ async function processMcpRequest(request, server, expressReq = null) {
       }
       
       // Execute the tool handler
-      const result = await handler(params);
+      const result = await handler(params, expressReq?.resolvedApiKey);
       const formattedResult = formatResponse(tool, result);
       
       console.error(`Tool ${tool} executed successfully`);

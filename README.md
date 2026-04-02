@@ -28,14 +28,19 @@ https://mcp.techmavie.digital/keywords-everywhere/mcp
 https://mcp.techmavie.digital/keywords-everywhere/analytics/dashboard
 ```
 
-### Using Your Own API Key
+### Using Your Own Credentials
 
-You can use your own Keywords Everywhere API key by appending it to the URL:
+For hosted clients, use your managed user key:
 ```
-https://mcp.techmavie.digital/keywords-everywhere/mcp?apiKey=YOUR_API_KEY
+https://mcp.techmavie.digital/keywords-everywhere/mcp/usr_YOUR_USER_KEY
 ```
 
-Or via header: `X-API-Key: YOUR_API_KEY`
+Compatibility query form:
+```
+https://mcp.techmavie.digital/keywords-everywhere/mcp?api_key=usr_YOUR_USER_KEY
+```
+
+For self-hosted/direct mode, send your raw Keywords Everywhere API key via header: `X-API-Key: YOUR_API_KEY`
 
 ### Compatible Clients
 
@@ -77,9 +82,9 @@ Simply add the server URL in Claude Desktop's MCP settings:
 https://mcp.techmavie.digital/keywords-everywhere/mcp
 ```
 
-To use your own API key:
+To use your hosted user key:
 ```
-https://mcp.techmavie.digital/keywords-everywhere/mcp?apiKey=YOUR_API_KEY
+https://mcp.techmavie.digital/keywords-everywhere/mcp/usr_YOUR_USER_KEY
 ```
 
 ### For Claude Desktop (Self-Hosted)
