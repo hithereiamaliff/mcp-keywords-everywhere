@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/hithereiamaliff-mcp-keywords-everywhere-badge.png)](https://mseep.ai/app/hithereiamaliff-mcp-keywords-everywhere)
+
 # Keywords Everywhere MCP Server
 
 A Model Context Protocol (MCP) server that provides access to the Keywords Everywhere API for SEO research and keyword analysis. This server enables AI assistants like Claude to perform keyword research, analyze search volumes, get competition data, and access various SEO metrics.
